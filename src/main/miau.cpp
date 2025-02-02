@@ -36,8 +36,8 @@ TFT_eSPI tft = TFT_eSPI(); // Initialize TFT object
 // TFT and Sprite Initialization
 
 // Wi-Fi Configuration
-const char *ssid = "NET_2G2931B3";
-const char *wifipw = "2F2931B3";
+const char *ssid = "DINO_network";
+const char *wifipw = "network@Dino32";
 
 // const char *ssid = "rededoprojeto";
 // const char *wifipw = "arededoprojeto";
@@ -214,5 +214,6 @@ void loop()
   tft.drawString(brightness_str + "%", 260, 200);
   // tft.drawBitmap(240, 180, sun_icon, 24, 24, TFT_BLACK); // Use your sun icon bitmap
 
-  tft.fillScreen(TFT_WHITE); // Limpa a tela inteira
+  // tft.fillScreen(TFT_WHITE); // Limpa a tela inteira
+  delay(100);
 }
