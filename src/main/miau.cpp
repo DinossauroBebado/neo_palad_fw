@@ -1,112 +1,91 @@
 #include <Wire.h>
-#include <Rtc_Pcf8563.h>
-#include <WiFi.h>
-#include "time.h"
+
 #include <TFT_eSPI.h>
 #include <SPI.h>
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
+#include <DHT_U.h>
+#include "get_time.h"
 
-// Pin Definitions
+// Definições de pinos
 #define light_pin 33
 #define screen_pin 32
 #define ldr_pin 36
 #define dht11_pin 14
 
-#include <Adafruit_Sensor.h>
-#include <DHT.h>
-#include <DHT_U.h>
+#define DHTPIN dht11_pin
+#define DHTTYPE DHT11
 
-#define DHTPIN dht11_pin // Digital pin connected to the DHT sensor
-// Feather HUZZAH 4ESP8266 note: use pins 3, 4, 5, 12, 13 or 14 --
-// Pin 15 can work but DHT must be disconnected during program upload.
+// Inicialização do display e sensores
+TFT_eSPI tft = TFT_eSPI();
 
-// Uncomment the type of sensor in use:
-#define DHTTYPE DHT11 // DHT 11
-// #define DHTTYPE    DHT22     // DHT 22 (AM2302)
-// #define DHTTYPE    DHT21     // DHT 21 (AM2301)
+DHT dht(DHTPIN, DHTTYPE);
 
-// See guide for details on sensor wiring and usage:
-//   https://learn.adafruit.com/dht/overview
+// Criando sprites para diferentes elementos da tela
+TFT_eSprite clockSprite = TFT_eSprite(&tft);
+TFT_eSprite tempSprite = TFT_eSprite(&tft);
+TFT_eSprite humiditySprite = TFT_eSprite(&tft);
+TFT_eSprite dateSprite = TFT_eSprite(&tft);
 
-DHT_Unified dht(DHTPIN, DHTTYPE);
+// Variáveis para armazenar valores anteriores (evita atualização desnecessária)
+String last_time = "";
+String last_date = "";
+String last_temp = "";
+String last_humidity = "";
 
-uint32_t delayMS;
+// variaveis controle da luz
+bool lightOn = false;
+int timeOnWeekday = 8;
+int timeOffWeekday = 20;
+int timeOnWeekend = 10;
+int timeOffWeekend = 22;
+int timeOn, timeoff;
 
-TFT_eSPI tft = TFT_eSPI(); // Initialize TFT object
-
-// TFT and Sprite Initialization
-
-// Wi-Fi Configuration
-const char *ssid = "DINO_network";
-const char *wifipw = "network@Dino32";
-
-// const char *ssid = "rededoprojeto";
-// const char *wifipw = "arededoprojeto";
-
-// RTC and NTP Variables
-Rtc_Pcf8563 rtc;
-bool rtcInitialized = false;
-struct tm timeinfo;
-unsigned long lastUpdate = 0;
-unsigned long updateInterval = 1000; // 1-second update interval
-
-// Timezone Function
-void setTimezone(String timezone)
+// Função para desenhar o relógio no sprite
+void drawClock(String time)
 {
-  setenv("TZ", timezone.c_str(), 1);
-  tzset();
+  clockSprite.fillSprite(TFT_BLACK);
+  clockSprite.setTextColor(TFT_WHITE);
+  clockSprite.setTextSize(6);
+  clockSprite.drawString(time, 20, 30);
+  clockSprite.pushSprite(0, 40); // Posiciona o sprite na tela
 }
 
-// Initialize NTP
-bool initTime(String timezone)
+// Função para desenhar a temperatura no sprite
+void drawTemperature(String temp)
 {
-  configTime(0, 0, "a.st1.ntp.br", "b.st1.ntp.br");
-  if (!getLocalTime(&timeinfo))
-  {
-    Serial.println("Failed to obtain NTP time");
-    return false;
-  }
-  setTimezone(timezone);
-  return true;
+  tempSprite.fillSprite(TFT_BLACK);
+  tempSprite.setTextColor(TFT_RED);
+  tempSprite.setTextSize(4);
+  tempSprite.drawString(temp, 10, 10);
+  tempSprite.pushSprite(165, 200); // Posiciona o sprite na tela
+}
+void drawDate(String date)
+{
+  dateSprite.fillSprite(TFT_BLACK);
+  dateSprite.setTextColor(TFT_WHITE);
+  dateSprite.setTextSize(3);
+  dateSprite.drawString(date, 70, 30);
+  dateSprite.pushSprite(0, 110); // Posiciona o sprite na tela
 }
 
-// Set RTC Time from NTP
-void setRtcTimeFromNtp()
+// Função para desenhar a umidade no sprite
+void drawHumidity(String humidity)
 {
-  rtc.setDate(timeinfo.tm_mday, timeinfo.tm_wday, timeinfo.tm_mon + 1, false, timeinfo.tm_year - 100);
-  rtc.setTime(timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+  humiditySprite.fillSprite(TFT_BLACK);
+  humiditySprite.setTextColor(TFT_BLUE);
+  humiditySprite.setTextSize(4);
+  humiditySprite.drawString(humidity, 10, 10);
+  humiditySprite.pushSprite(5, 200); // Posiciona o sprite na tela
 }
 
-// Start Wi-Fi
-void startWifi()
-{
-  WiFi.begin(ssid, wifipw);
-  unsigned long startAttemptTime = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 30000)
-  {
-    delay(500);
-  }
-}
-
-// Wi-Fi Reconnect Function
-void reconnectWifi()
-{
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    startWifi();
-  }
-}
-
-// Setup Function
 void setup()
 {
-  Serial.begin(9600);
-
-  dht.begin();
-  sensor_t sensor;
-
-  pinMode(light_pin, OUTPUT);
-  pinMode(screen_pin, OUTPUT);
-  pinMode(ldr_pin, INPUT);
+  tft.setRotation(1);
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(4);
+  tft.drawString("Init Wifi", 40, 150);
 
   startWifi();
   initTime("<GMT-3>");
@@ -117,103 +96,93 @@ void setup()
     setRtcTimeFromNtp();
   }
 
-  // Initialize TFT
+  Serial.begin(115200);
   tft.init();
-  tft.setRotation(3);
-  tft.fillScreen(TFT_WHITE);
 
-  delayMS = sensor.min_delay / 1000;
+  // rtc.begin();
+  dht.begin();
+
+  // Configurando os sprites
+  clockSprite.createSprite(370, 100); // Tamanho do sprite para o relógio
+  dateSprite.createSprite(370, 50);
+  tempSprite.createSprite(150, 40);     // Tamanho do sprite para a temperatura
+  humiditySprite.createSprite(150, 40); // Tamanho do sprite para a umidade
+
+  tft.drawLine(10, 170, 310, 170, TFT_WHITE);
+  String current_date = rtc.formatDate();
+  drawDate(current_date);
+  tft.fillScreen(TFT_BLACK);
 }
 
-// Loop Function
 void loop()
 {
-  // delay(delayMS);
-  int ldr_read = analogRead(ldr_pin);
-  ldr_read = map(ldr_read, 0, 4096, 0, 100);
-  Serial.println(ldr_read);
+  // Atualiza hora e data
+  String current_time = rtc.formatTime();
+  String current_date = rtc.formatDate();
+  // int weekday = rtc.getWeekday();
+  int weekday = 0;
 
-  sensors_event_t event;
-
-  unsigned long currentMillis = millis();
-
-  if (currentMillis - lastUpdate >= updateInterval)
+  Serial.println(weekday);
+  // weekend
+  if (weekday == 0 || weekday == 6)
   {
-    lastUpdate = currentMillis;
-
-    // Control light and screen based on time
-    if (rtc.getHour() >= 8 && rtc.getHour() <= 20)
-    {
-      digitalWrite(light_pin, HIGH);
-      digitalWrite(screen_pin, HIGH);
-    }
-    else
-    {
-      digitalWrite(light_pin, LOW);
-      digitalWrite(screen_pin, LOW);
-    }
-  }
-
-  reconnectWifi();
-
-  // Draw the Wi-Fi symbol and header text
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(TFT_BLACK, TFT_WHITE);
-  tft.setTextSize(2);
-  tft.drawString(ssid, 50, 10);
-
-  // Draw the time block
-  tft.fillRect(10, 40, 300, 100, TFT_WHITE);
-  tft.setTextDatum(TC_DATUM);
-  tft.setTextSize(6);
-  tft.setTextColor(TFT_BLACK);
-  tft.drawString(rtc.formatTime(), 160, 70);
-  tft.setTextSize(2);
-  tft.drawString(rtc.formatDate(), 160, 130);
-
-  // Draw the time range
-  tft.setTextSize(2);
-  tft.drawString("08:00", 40, 150);
-  tft.drawString("20:00", 270, 150);
-
-  // Draw the divider line
-  tft.drawLine(10, 170, 310, 170, TFT_BLACK);
-
-  // Draw the icons and values
-  tft.setTextDatum(TC_DATUM);
-  tft.setTextSize(3);
-
-  dht.humidity().getEvent(&event);
-  if (isnan(event.relative_humidity))
-  {
-    Serial.println(F("Error reading humidity!"));
+    timeOn = timeOnWeekend;
+    timeoff = timeOffWeekend;
   }
   else
   {
-    String humidity_str = String(event.relative_humidity, 1); // Convert float to String with 1 decimal place
-    tft.drawString(humidity_str + " %", 60, 200);
+    timeOn = timeOnWeekday;
+    timeoff = timeOffWeekday;
   }
-  dht.temperature().getEvent(&event);
-  if (isnan(event.temperature))
+
+  // Atualiza temperatura e umidade
+  float temp = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  String temp_str = String(temp, 1) + " C";
+  String humidity_str = String(humidity, 1) + " %";
+
+  // Control light and screen based on time
+  lightOn = (rtc.getHour() >= timeOn && rtc.getHour() <= timeoff);
+
+  // Atualiza apenas se houver mudança
+
+  if (current_date != last_date)
   {
-    Serial.println(F("Error reading temperature!"));
+    drawDate(current_date);
+    last_date = current_date;
+  }
+
+  if (current_time != last_time)
+  {
+    drawClock(current_time);
+    last_time = current_time;
+  }
+
+  if (temp_str != last_temp)
+  {
+    drawTemperature(temp_str);
+    last_temp = temp_str;
+  }
+
+  if (humidity_str != last_humidity)
+  {
+    drawHumidity(humidity_str);
+    last_humidity = humidity_str;
+  }
+
+  // controls reles
+
+  if (lightOn)
+  {
+    Serial.println("-");
+    digitalWrite(light_pin, HIGH);
+    digitalWrite(screen_pin, HIGH);
   }
   else
   {
-    // Temperature
-    String temp_str = String(event.temperature, 1); // Convert float to String with 1 decimal place
-    tft.drawString(temp_str + " C", 170, 200);
+    digitalWrite(light_pin, HIGH);
+    digitalWrite(screen_pin, HIGH);
   }
 
-  // Humidity
-  // Append "%" and display
-  // tft.drawCircle(40, 200, 20, TFT_BLACK); // Draw water drop icon
-
-  // Brightness
-  String brightness_str = String(ldr_read); // Convert float to String with 1 decimal place
-  tft.drawString(brightness_str + "%", 260, 200);
-  // tft.drawBitmap(240, 180, sun_icon, 24, 24, TFT_BLACK); // Use your sun icon bitmap
-
-  // tft.fillScreen(TFT_WHITE); // Limpa a tela inteira
-  delay(100);
+  delay(500); // Reduz a taxa de atualização
 }
